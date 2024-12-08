@@ -3,12 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pose Estimation</title>
+  <title>Pose Detection</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <video id="video" controls></video>
-  <canvas id="canvas"></canvas>
 
+  <h1>Pose Detection</h1>
+  <div class="video-container">
+    <video id="webcam" muted autoplay loop></video>
+    <canvas id="output_canvas"></canvas>
+  </div>
+  
+  
   <script type="module" src="script.js"></script>
 </body>
 </html>

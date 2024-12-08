@@ -1,86 +1,125 @@
-import { Pose } from "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.min.js";
+import {
+  PoseLandmarker,
+  FilesetResolver,
+  DrawingUtils
+} from "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0";
 
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+document.addEventListener("DOMContentLoaded", async () => {
+  const videoContainer = document.querySelector('.video-container');
+  const video = document.getElementById("webcam");
+  const canvasElement = document.getElementById("output_canvas");
+  const canvasCtx = canvasElement.getContext("2d");
+  const drawingUtils = new DrawingUtils(canvasCtx);
 
-async function setupVideo() {
-  try {
-    // Set the video source and controls
-    video.src = "./lifting_video.mp4";
-    video.controls = true;
+  let poseLandmarker = null;
+  let runningMode = "VIDEO";
+  let lastVideoTime = -1;
+  let msPrev = window.performance.now();
+  const fps = 60;
+  const msPerFrame = 1000 / fps;
 
-    await new Promise((resolve, reject) => {
-      video.onloadedmetadata = () => {
-        // Set canvas size to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        resolve();
-      };
-      video.onerror = reject;
-    });
-  } catch (error) {
-    console.error("Video setup failed:", error);
+  // EMA smoothing
+  const alpha = 0.8; // Smoothing factor (0 < alpha < 1)
+  let emaLandmarks = null;
+
+  function resizeCanvas() {
+    const containerRect = videoContainer.getBoundingClientRect();
+    const scale = Math.min(containerRect.width / video.videoWidth, containerRect.height / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    const left = (containerRect.width - width) / 2;
+    const top = (containerRect.height - height) / 2;
+
+    canvasElement.style.width = `${width}px`;
+    canvasElement.style.height = `${height}px`;
+    canvasElement.style.left = `${left}px`;
+    canvasElement.style.top = `${top}px`;
+    canvasElement.width = video.videoWidth;
+    canvasElement.height = video.videoHeight;
   }
-}
 
-async function run() {
-  try {
-    // Wait for the video to be set up
-    await setupVideo();
-
-    // Initialize Pose
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675473637/${file}`,
+  // Initialize PoseLandmarker with model complexity
+  const createPoseLandmarker = async () => {
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+    );
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task`,
+        delegate: "GPU"
+      },
+      runningMode: runningMode,
+      numPoses: 2,
+      modelComplexity: "heavy" // Options: "lite", "full", or "heavy"
     });
+    console.log("PoseLandmarker created successfully with model complexity: full");
+  };
 
-    // Load the pose estimation model
-    await pose.load();
+  function applyEMA(newLandmarks, emaLandmarks, alpha) {
+    if (!emaLandmarks) return newLandmarks;
+    return newLandmarks.map((landmark, i) => ({
+      x: alpha * landmark.x + (1 - alpha) * emaLandmarks[i].x,
+      y: alpha * landmark.y + (1 - alpha) * emaLandmarks[i].y,
+      z: alpha * landmark.z + (1 - alpha) * emaLandmarks[i].z,
+      visibility: landmark.visibility
+    }));
+  }
 
-    // Setup results handler
-    pose.onResults((results) => {
-      // Clear the canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const estimatePoses = (now) => {
+    if (!poseLandmarker) {
+      console.warn("PoseLandmarker not initialized yet");
+      requestAnimationFrame(estimatePoses);
+      return;
+    }
 
-      // Draw the video frame
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const msPassed = now - msPrev;
+    if (msPassed < msPerFrame) {
+      requestAnimationFrame(estimatePoses);
+      return;
+    }
 
-      // Check if landmarks are detected
-      if (results.poseLandmarks) {
-        console.log("Landmarks detected:", results.poseLandmarks.length);
+    const excessTime = msPassed % msPerFrame;
+    msPrev = now - excessTime;
 
-        // Draw landmarks
-        results.poseLandmarks.forEach((landmark, index) => {
-          const x = landmark.x * canvas.width;
-          const y = landmark.y * canvas.height;
+    if (lastVideoTime !== video.currentTime) {
+      lastVideoTime = video.currentTime;
+      const results = poseLandmarker.detectForVideo(video, performance.now());
+      
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      
+      if (results.landmarks) {
+        for (const landmarks of results.landmarks) {
+          // Apply EMA smoothing
+          const smoothedLandmarks = applyEMA(landmarks, emaLandmarks, alpha);
+          emaLandmarks = smoothedLandmarks;
 
-          ctx.beginPath();
-          ctx.arc(x, y, 5, 0, 2 * Math.PI);
-          ctx.fillStyle = "red";
-          ctx.fill();
-
-          // Optional: Add landmark index
-          ctx.fillStyle = "white";
-          ctx.font = "10px Arial";
-          ctx.fillText(index, x, y);
-        });
-      }
-    });
-
-    // Process the video frame by frame
-    video.addEventListener("play", async () => {
-      const processVideo = async () => {
-        if (!video.paused && !video.ended) {
-          await pose.send({ image: video });
-          requestAnimationFrame(processVideo);
+          drawingUtils.drawConnectors(smoothedLandmarks, PoseLandmarker.POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 1 });
+          drawingUtils.drawLandmarks(smoothedLandmarks, { color: '#FF0000', lineWidth: 1 });
         }
-      };
-      processVideo();
-    });
-  } catch (error) {
-    console.error("Pose estimation setup failed:", error);
-  }
-}
+      }
+    }
 
-// Run when DOM is loaded
-document.addEventListener("DOMContentLoaded", run);
+    requestAnimationFrame(estimatePoses);
+  };
+
+  // Set up video source
+  video.src = "lifting_video.mp4";
+  video.addEventListener('loadedmetadata', () => {
+    console.log("Video metadata loaded");
+    resizeCanvas();
+    createPoseLandmarker().then(() => {
+      requestAnimationFrame(estimatePoses);
+    });
+  });
+
+  // Start playing the video
+  try {
+    await video.play();
+  } catch (error) {
+    console.error("Error playing the video:", error);
+  }
+
+  // Handle window resizing
+  const resizeObserver = new ResizeObserver(resizeCanvas);
+  resizeObserver.observe(videoContainer);
+});
