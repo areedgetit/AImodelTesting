@@ -1,5 +1,13 @@
-video {
-      display: block;
-      margin: auto;
-      max-width: 100%;
-    }
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;  /* Prevent scrollbars if canvas and video are positioned correctly */
+}
+
+video, canvas {
+  display: block;
+  margin: 0 auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+}

@@ -1,60 +1,86 @@
+import { Pose } from "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675473637/pose.js";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
 async function setupVideo() {
-  // Select the video element
-  const video = document.getElementById('video');
-  
-  // Load the video from the local directory (make sure the video file is in the same folder as the HTML)
-  video.src = 'lifting_video.mp4';  // Ensure the file name matches the video file you added
-  
-  // Wait for the video to load completely before proceeding
-  await new Promise((resolve) => {
-    video.onloadeddata = () => {
-      resolve();
-    };
-  });
-}
+  try {
+    // Set the video source and controls
+    video.src = "./lifting_video.mp4";
+    video.controls = true;
 
-async function estimatePose(video) {
-  // Load the PoseNet model
-  const net = await posenet.load();
-  
-  // Estimate the pose from the video frame
-  const pose = await net.estimateSinglePose(video, {
-    flipHorizontal: false
-  });
-  
-  console.log(pose);
-  drawPose(pose);
-}
-
-function drawPose(pose) {
-  const canvas = document.createElement('canvas');
-  document.body.appendChild(canvas);
-  const ctx = canvas.getContext('2d');
-  canvas.width = 640;
-  canvas.height = 480;
-
-  // Draw keypoints
-  pose.keypoints.forEach((point) => {
-    if (point.score > 0.5) {
-      ctx.beginPath();
-      ctx.arc(point.position.x, point.position.y, 5, 0, 2 * Math.PI);
-      ctx.fillStyle = 'red';
-      ctx.fill();
-    }
-  });
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => {
+        // Set canvas size to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        resolve();
+      };
+      video.onerror = reject;
+    });
+  } catch (error) {
+    console.error("Video setup failed:", error);
+  }
 }
 
 async function run() {
-  const video = document.getElementById('video');
-  await setupVideo();
+  try {
+    // Wait for the video to be set up
+    await setupVideo();
 
-  // Once the video is loaded, start analyzing it
-  video.onplaying = async () => {
-    while (!video.paused && !video.ended) {
-      await estimatePose(video);
-      await new Promise(resolve => setTimeout(resolve, 100));  // Process every 100 ms (10 FPS)
-    }
-  };
+    // Initialize Pose
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675473637/${file}`,
+    });
+
+    // Load the pose estimation model
+    await pose.load();
+
+    // Setup results handler
+    pose.onResults((results) => {
+      // Clear the canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw the video frame
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Check if landmarks are detected
+      if (results.poseLandmarks) {
+        console.log("Landmarks detected:", results.poseLandmarks.length);
+
+        // Draw landmarks
+        results.poseLandmarks.forEach((landmark, index) => {
+          const x = landmark.x * canvas.width;
+          const y = landmark.y * canvas.height;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = "red";
+          ctx.fill();
+
+          // Optional: Add landmark index
+          ctx.fillStyle = "white";
+          ctx.font = "10px Arial";
+          ctx.fillText(index, x, y);
+        });
+      }
+    });
+
+    // Process the video frame by frame
+    video.addEventListener("play", async () => {
+      const processVideo = async () => {
+        if (!video.paused && !video.ended) {
+          await pose.send({ image: video });
+          requestAnimationFrame(processVideo);
+        }
+      };
+      processVideo();
+    });
+  } catch (error) {
+    console.error("Pose estimation setup failed:", error);
+  }
 }
 
-run();
+// Run when DOM is loaded
+document.addEventListener("DOMContentLoaded", run);
