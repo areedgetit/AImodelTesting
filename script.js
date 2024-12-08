@@ -1,4 +1,4 @@
-import { Pose } from "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675473637/pose.js";
+import { Pose } from "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.min.js";
 
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
